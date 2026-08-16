@@ -61,6 +61,21 @@ This project follows the Studio storage guidance announced by the GenLayer team:
 contracts/release_proof_verifier.py
 ```
 
+Runtime pin:
+
+```python
+# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
+```
+
+The contract uses the supported GenLayer SDK form:
+
+- `class ReleaseProofVerifier(gl.Contract)`
+- `@gl.public.write`
+- `@gl.public.view`
+- `gl.vm.run_nondet_unsafe(...)`
+- `gl.nondet.web.render(...)`
+- `gl.nondet.exec_prompt(...)`
+
 Main write method:
 
 ```python
@@ -115,7 +130,25 @@ Expected output shape:
 
 ```bash
 npm install
+npm run contract:check
 npm run dev
 ```
 
 To submit transactions, use a browser wallet connected to GenLayer Studio.
+
+## Reproducible Contract Check
+
+The repository includes a deterministic preflight check for the contract source:
+
+```bash
+npm run contract:check
+```
+
+The check validates:
+
+- the pinned `py-genlayer` runtime header is present
+- `ReleaseProofVerifier` inherits `gl.Contract`
+- all public read/write methods are decorated with `gl.public`
+- unsupported legacy SDK calls are absent
+- GenLayer nondeterministic consensus, web render, and prompt calls are present
+- release ID formatting is deterministic
