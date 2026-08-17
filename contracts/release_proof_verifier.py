@@ -15,6 +15,7 @@ class ReleaseVerdict(typing.NamedTuple):
     changelog_match: bool
     risk_flags_json: str
     evidence_bundle_hash: str
+    snapshot_commitments_json: str
     summary: str
 
 
@@ -60,12 +61,20 @@ class ReleaseProofVerifier(gl.Contract):
         if len(version.strip()) == 0:
             raise Exception("version_required")
 
-        source_urls = _validate_sources([github_release_url, registry_url, changelog_url])
-        source_manifest = _source_manifest(source_urls)
-        if source_manifest[0]["host"] == source_manifest[1]["host"]:
-            raise Exception("github_and_registry_must_be_independent")
+        normalized_package = _normalize_package_name(package_name)
+        source_manifest = _canonical_sources(
+            normalized_package,
+            github_release_url,
+            registry_url,
+            changelog_url,
+        )
+        source_urls = [source["canonical_url"] for source in source_manifest]
 
-        release_id = _release_id(package_name, version)
+        release_id = _release_id(
+            source_manifest[1]["package_identity"],
+            source_manifest[0]["publisher_identity"],
+            version,
+        )
         if len(self.releases.get(release_id, "")) > 0:
             raise Exception("release_already_verified")
 
@@ -96,6 +105,8 @@ class ReleaseProofVerifier(gl.Contract):
                 return False
             if proposed.risk_flags_json != independent.risk_flags_json:
                 return False
+            if proposed.snapshot_commitments_json != independent.snapshot_commitments_json:
+                return False
 
             return True
 
@@ -104,11 +115,16 @@ class ReleaseProofVerifier(gl.Contract):
 
         self.release_count = u64(int(self.release_count) + 1)
         record = {
+            "schema_version": "releaseproof.v2",
             "release_id": release_id,
-            "package_name": package_name,
+            "package_name": normalized_package,
             "version": version,
+            "package_identity": source_manifest[1]["package_identity"],
+            "publisher_identity": source_manifest[0]["publisher_identity"],
             "source_urls": source_urls,
             "source_manifest": source_manifest,
+            "snapshot_commitments": verdict["snapshot_commitments"],
+            "evidence_bundle_hash": verdict["evidence_bundle_hash"],
             "submitted_by": str(gl.message.sender_address),
             "result": verdict,
             "accepted_write": {
@@ -149,7 +165,23 @@ def _adjudicate_release(
             }
         )
 
-    evidence_bundle_hash = _sha256(json.dumps(evidence_hashes, separators=(",", ":")))
+    snapshot_commitments = []
+    for source, snapshot_hash, rendered in zip(source_manifest, evidence_hashes, source_payloads):
+        snapshot_commitments.append(
+            {
+                "source_index": source["source_index"],
+                "source_type": source["source_type"],
+                "canonical_url": source["canonical_url"],
+                "package_identity": source["package_identity"],
+                "publisher_identity": source["publisher_identity"],
+                "url_hash": source["url_hash"],
+                "snapshot_hash": snapshot_hash,
+                "snapshot_chars": rendered["snapshot_chars"],
+            }
+        )
+    evidence_bundle_hash = _sha256(
+        json.dumps(snapshot_commitments, sort_keys=True, separators=(",", ":"))
+    )
 
     prompt = f"""
 You are reviewing software release provenance for GenLayer consensus.
@@ -196,6 +228,7 @@ Rules:
         "changelog_match": bool(data["changelog_match"]),
         "risk_flags": [str(flag).lower()[:80] for flag in data["risk_flags"][:8]],
         "evidence_bundle_hash": str(data["evidence_bundle_hash"]),
+        "snapshot_commitments": snapshot_commitments,
         "summary": str(data["summary"])[:450],
     }
     return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
@@ -208,6 +241,9 @@ def _parse_verdict(raw_json: str) -> ReleaseVerdict:
     risk_flags = data["risk_flags"]
     risk_flags_json = json.dumps(risk_flags, sort_keys=True, separators=(",", ":"))
     evidence_bundle_hash = str(data["evidence_bundle_hash"])
+    snapshot_commitments_json = json.dumps(
+        data["snapshot_commitments"], sort_keys=True, separators=(",", ":")
+    )
     summary = str(data["summary"])
 
     if status not in ("verified", "mismatch", "incomplete", "risky"):
@@ -220,6 +256,8 @@ def _parse_verdict(raw_json: str) -> ReleaseVerdict:
         raise Exception("invalid summary")
     if len(risk_flags) > 8:
         raise Exception("too many risk flags")
+    if len(data["snapshot_commitments"]) != 3:
+        raise Exception("invalid snapshot commitments")
 
     return ReleaseVerdict(
         status=status,
@@ -230,50 +268,111 @@ def _parse_verdict(raw_json: str) -> ReleaseVerdict:
         changelog_match=bool(data["changelog_match"]),
         risk_flags_json=risk_flags_json,
         evidence_bundle_hash=evidence_bundle_hash,
+        snapshot_commitments_json=snapshot_commitments_json,
         summary=summary,
     )
 
 
-def _validate_sources(source_urls: typing.Sequence[str]) -> typing.Sequence[str]:
-    normalized = []
-    seen = set()
-    for raw_url in source_urls:
-        url = str(raw_url).strip()
-        if not url.startswith("https://"):
-            raise Exception("sources_must_use_https")
-        if len(url) > 500:
-            raise Exception("source_url_too_long")
-        key = url.rstrip("/").lower()
-        if key in seen:
-            raise Exception("duplicate_source")
-        seen.add(key)
-        normalized.append(url)
-    return normalized
+def _canonical_sources(
+    package_name: str,
+    github_release_url: str,
+    registry_url: str,
+    changelog_url: str,
+) -> typing.Sequence[dict]:
+    github = _canonical_github_source(github_release_url, "github_release")
+    registry = _canonical_npm_source(registry_url, package_name)
+    changelog = _canonical_github_source(changelog_url, "changelog")
+
+    if changelog["publisher_identity"] != github["publisher_identity"]:
+        raise Exception("changelog_must_belong_to_release_publisher")
+
+    return [
+        _manifest_entry(1, github, registry["package_identity"]),
+        _manifest_entry(2, registry, registry["package_identity"]),
+        _manifest_entry(3, changelog, registry["package_identity"]),
+    ]
 
 
-def _source_manifest(source_urls: typing.Sequence[str]) -> typing.Sequence[dict]:
-    source_types = ["github_release", "package_registry", "changelog"]
-    manifest = []
-    for index, url in enumerate(source_urls):
-        manifest.append(
-            {
-                "source_index": index + 1,
-                "source_type": source_types[index],
-                "host": _url_host(url),
-                "url_hash": _sha256(url),
-            }
-        )
-    return manifest
+def _manifest_entry(index: int, source: dict, package_identity: str) -> dict:
+    return {
+        "source_index": index,
+        "source_type": source["source_type"],
+        "host": source["host"],
+        "canonical_url": source["canonical_url"],
+        "package_identity": package_identity,
+        "publisher_identity": source["publisher_identity"],
+        "url_hash": _sha256(source["canonical_url"]),
+    }
 
 
-def _release_id(package_name: str, version: str) -> str:
-    normalized = package_name.strip().lower() + "@" + version.strip().lower()
+def _canonical_github_source(raw_url: str, source_type: str) -> dict:
+    host, parts = _url_parts(raw_url)
+    if host != "github.com" or len(parts) < 3:
+        raise Exception("github_source_must_be_canonical")
+    owner = parts[0].lower()
+    repository = parts[1].lower()
+    if parts[2] not in ("releases", "tags", "blob"):
+        raise Exception("github_source_must_be_release_tag_or_changelog")
+    canonical_url = "https://github.com/" + "/".join(parts)
+    return {
+        "source_type": source_type,
+        "host": host,
+        "canonical_url": canonical_url,
+        "publisher_identity": "github:" + owner + "/" + repository,
+    }
+
+
+def _canonical_npm_source(raw_url: str, package_name: str) -> dict:
+    host, parts = _url_parts(raw_url)
+    if host not in ("npmjs.com", "www.npmjs.com") or len(parts) < 2 or parts[0] != "package":
+        raise Exception("registry_must_be_canonical_npm_package_url")
+
+    package_end = 3 if parts[1].startswith("@") else 2
+    if len(parts) < package_end:
+        raise Exception("registry_package_missing")
+    registry_package = "/".join(parts[1:package_end])
+    if _normalize_package_name(registry_package) != package_name:
+        raise Exception("registry_package_identity_mismatch")
+
+    canonical_url = "https://www.npmjs.com/" + "/".join(parts)
+    return {
+        "source_type": "package_registry",
+        "host": "www.npmjs.com",
+        "canonical_url": canonical_url,
+        "publisher_identity": "npm:" + package_name,
+        "package_identity": "npm:" + package_name,
+    }
+
+
+def _normalize_package_name(raw_name: str) -> str:
+    package_name = str(raw_name).strip().lower()
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-._@/"
+    if len(package_name) < 3 or any(char not in allowed for char in package_name):
+        raise Exception("invalid_package_name")
+    if package_name.count("/") > 1 or ("/" in package_name and not package_name.startswith("@")):
+        raise Exception("invalid_package_name")
+    return package_name
+
+
+def _release_id(package_identity: str, publisher_identity: str, version: str) -> str:
+    normalized = package_identity + "|" + publisher_identity + "|" + version.strip().lower()
     return "rel_" + _sha256(normalized)[:20]
 
 
-def _url_host(url: str) -> str:
-    without_scheme = url.split("://", 1)[1]
-    return without_scheme.split("/", 1)[0].lower()
+def _url_parts(raw_url: str) -> typing.Tuple[str, typing.Sequence[str]]:
+    url = str(raw_url).strip()
+    if not url.startswith("https://") or len(url) > 500:
+        raise Exception("sources_must_use_canonical_https")
+    if "?" in url or "#" in url:
+        raise Exception("sources_must_not_include_query_or_fragment")
+    without_scheme = url[8:]
+    if "/" not in without_scheme:
+        raise Exception("source_path_required")
+    host, path = without_scheme.split("/", 1)
+    parts = [part for part in path.split("/") if len(part) > 0]
+    if len(parts) == 0:
+        raise Exception("source_path_required")
+    return host.lower(), parts
 
 
 def _sha256(value: str) -> str:

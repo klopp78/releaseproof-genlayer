@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  readLatestReleaseId,
   readRelease,
   readReleaseCount,
   RELEASE_PROOF_CONTRACT_ADDRESS,
@@ -23,15 +22,28 @@ type ChainStatus =
   | "error";
 
 type ReleaseRecord = {
+  schema_version?: string;
   release_id?: string;
   package_name?: string;
   version?: string;
+  package_identity?: string;
+  publisher_identity?: string;
   submitted_by?: string;
   source_manifest?: {
     source_type?: string;
     host?: string;
     url_hash?: string;
+    canonical_url?: string;
+  }[];
+  snapshot_commitments?: {
+    source_type?: string;
+    host?: string;
+    canonical_url?: string;
+    package_identity?: string;
+    publisher_identity?: string;
+    url_hash?: string;
     snapshot_hash?: string;
+    snapshot_chars?: number;
   }[];
   evidence_bundle_hash?: string;
   accepted_write?: {
@@ -129,6 +141,7 @@ export default function Home() {
   const [status, setStatus] = useState<ChainStatus>("idle");
   const [message, setMessage] = useState("");
   const [releaseCount, setReleaseCount] = useState<string>("not read");
+  const [releaseId, setReleaseId] = useState("");
   const [record, setRecord] = useState<ReleaseRecord | null>(null);
 
   const hosts = useMemo(() => {
@@ -165,20 +178,24 @@ export default function Home() {
     return account;
   }
 
-  async function readLatest() {
+  async function readById() {
     const account = walletAddress ?? (await connectWallet());
     if (!account) return;
+    if (!releaseId.trim()) {
+      setStatus("error");
+      setMessage("Enter a release ID returned by a submitted transaction.");
+      return;
+    }
 
     try {
       setStatus("reading");
       setMessage("");
       const count = await readReleaseCount({ walletAddress: account });
       setReleaseCount(String(count));
-      const latestId = await readLatestReleaseId({ walletAddress: account });
-      const latest = await readRelease(String(latestId), {
+      const storedRelease = await readRelease(releaseId.trim(), {
         walletAddress: account,
       });
-      setRecord(parseRecord(latest));
+      setRecord(parseRecord(storedRelease));
       setStatus("accepted");
     } catch (error) {
       setStatus("error");
@@ -202,8 +219,9 @@ export default function Home() {
         changelogUrl,
       });
       setRecord(parseRecord(result.release));
+      setReleaseId(result.releaseId);
       setStatus("accepted");
-      setMessage(`Consensus accepted release ID ${result.latestReleaseId}`);
+      setMessage(`Consensus accepted release ID ${result.releaseId}`);
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : String(error));
@@ -271,7 +289,7 @@ export default function Home() {
             </div>
             <div>
               <span>Consensus record</span>
-              <strong>{record?.release_id ?? "not written yet"}</strong>
+              <strong>{(record?.release_id ?? releaseId) || "not written yet"}</strong>
             </div>
           </div>
         </div>
@@ -338,12 +356,23 @@ export default function Home() {
             value={changelogUrl}
           />
 
+          <label className="field-label" htmlFor="release-id">
+            Stored release ID
+          </label>
+          <input
+            className="text-input mb-5 w-full"
+            id="release-id"
+            onChange={(event) => setReleaseId(event.target.value)}
+            placeholder="Returned after a successful transaction"
+            value={releaseId}
+          />
+
           <div className="grid gap-3 sm:grid-cols-3">
             <button className="action-button" onClick={connectWallet}>
               Connect wallet
             </button>
-            <button className="action-button" onClick={readLatest}>
-              Read latest
+            <button className="action-button" onClick={readById}>
+              Read release ID
             </button>
             <button
               className="action-button primary"
@@ -396,8 +425,8 @@ export default function Home() {
                 <strong>{record?.result?.status ?? "waiting for consensus"}</strong>
               </div>
               <div className="info-tile">
-                <span>Evidence bundle</span>
-                <strong>{shortHash(record?.evidence_bundle_hash)}</strong>
+              <span>Evidence bundle</span>
+                <strong>{shortHash(record?.evidence_bundle_hash ?? record?.result?.evidence_bundle_hash)}</strong>
               </div>
             </div>
 
@@ -421,17 +450,17 @@ export default function Home() {
             </div>
 
             <div className="space-y-2">
-              {(record?.source_manifest ?? []).map((source) => (
+              {(record?.snapshot_commitments ?? []).map((source) => (
                 <div className="evidence-row" key={source.source_type}>
                   <span>{source.source_type}</span>
                   <strong>{source.host}</strong>
                   <code>{shortHash(source.snapshot_hash)}</code>
                 </div>
               ))}
-              {record?.source_manifest?.length ? null : (
+              {record?.snapshot_commitments?.length ? null : (
                 <div className="evidence-row">
-                  <span>source manifest</span>
-                  <strong>created by contract</strong>
+                  <span>snapshot commitments</span>
+                  <strong>stored by contract</strong>
                   <code>snapshot hashes pending</code>
                 </div>
               )}

@@ -44,18 +44,6 @@ export async function readReleaseCount(options: ChainReadOptions = {}) {
   });
 }
 
-export async function readLatestReleaseId(options: ChainReadOptions = {}) {
-  const client = createReleaseProofClient(options.walletAddress);
-
-  return client.readContract({
-    address: releaseProofAddress(options.contractAddress),
-    functionName: "get_latest_release_id",
-    args: [],
-    jsonSafeReturn: true,
-    leaderOnly: true,
-  });
-}
-
 export async function readRelease(
   releaseId: string,
   options: ChainReadOptions = {},
@@ -99,12 +87,32 @@ export async function submitReleaseProof({
   const receipt = await client.waitForTransactionReceipt({
     hash,
     status: TransactionStatus.ACCEPTED,
+    fullTransaction: true,
   });
 
-  const latestReleaseId = await readLatestReleaseId({ walletAddress });
-  const release = await readRelease(String(latestReleaseId), {
+  const releaseId = releaseIdFromReceipt(receipt);
+  const release = await readRelease(releaseId, {
     walletAddress,
   });
 
-  return { hash, receipt, latestReleaseId: String(latestReleaseId), release };
+  return { hash, receipt, releaseId, release };
+}
+
+function releaseIdFromReceipt(receipt: unknown): string {
+  const candidates = collectStrings(receipt);
+  const releaseId = candidates
+    .map((value) => value.match(/rel_[a-f0-9]{20}/)?.[0])
+    .find((value): value is string => Boolean(value));
+
+  if (!releaseId) {
+    throw new Error("Accepted transaction did not return a release ID.");
+  }
+
+  return releaseId;
+}
+
+function collectStrings(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (!value || typeof value !== "object") return [];
+  return Object.values(value as Record<string, unknown>).flatMap(collectStrings);
 }

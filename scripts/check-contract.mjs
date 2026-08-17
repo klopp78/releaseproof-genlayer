@@ -60,7 +60,12 @@ assert(/gl\.vm\.run_nondet_unsafe/.test(source), "missing GenLayer nondeterminis
 assert(/gl\.nondet\.web\.render/.test(source), "missing GenLayer web render call");
 assert(/gl\.nondet\.exec_prompt/.test(source), "missing GenLayer prompt call");
 
-const releaseId = `rel_${sha256("genlayer-js@1.1.8").slice(0, 20)}`;
+assert(/snapshot_commitments/.test(source), "contract must persist snapshot commitments");
+assert(/canonical_sources/.test(source), "contract must canonicalize source identities");
+assert(/registry_package_identity_mismatch/.test(source), "contract must bind registry URLs to package identity");
+assert(/changelog_must_belong_to_release_publisher/.test(source), "contract must bind changelog to publisher identity");
+
+const releaseId = `rel_${sha256("npm:genlayer-js|github:yeagerai/genlayer-js|1.1.8").slice(0, 20)}`;
 assert(releaseId.length === 24, "release id format check failed");
 
 console.log("ReleaseProof contract check passed");

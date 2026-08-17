@@ -51,9 +51,21 @@ This project follows the Studio storage guidance announced by the GenLayer team:
 - large rendered pages are not stored on-chain
 - each source gets a `snapshot_hash`
 - each URL gets a `url_hash`
+- every stored record includes the exact `snapshot_commitments` displayed in the UI
 - each accepted release gets an `evidence_bundle_hash`
 - the registry stores compact records by `release_id`
 - records preserve only essential provenance fields, verdict fields, and accepted-write metadata
+
+## Source Provenance and Readback
+
+ReleaseProof accepts canonical GitHub release/changelog URLs from the same
+publisher repository and canonical npm package URLs that match the submitted
+package name. The accepted record binds the npm package identity, GitHub
+publisher identity, canonical URLs, URL hashes, and rendered snapshot hashes.
+
+The frontend does not query a shared `latest` record after submission. It
+extracts the `release_id` returned by the accepted transaction receipt, then
+reads that exact stored record back from the contract.
 
 ## Contract
 
