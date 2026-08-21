@@ -63,6 +63,27 @@ publisher repository and canonical npm package URLs that match the submitted
 package name. The accepted record binds the npm package identity, GitHub
 publisher identity, canonical URLs, URL hashes, and rendered snapshot hashes.
 
+### Publisher Ownership Gate
+
+Release verification is deliberately a two-step protocol. Before any release
+can be recorded for a GitHub publisher, that publisher must call
+`claim_publisher(...)`. The contract renders both the npm package page and a
+repository-owned proof file at a versioned path such as:
+
+```text
+https://github.com/<owner>/<repo>/blob/<branch>/.releaseproof/ownership.json
+```
+
+That file must state the exact npm package, the exact GitHub repository, and
+the caller wallet. Validators independently confirm that the npm registry page
+associates the package with the same repository and that the proof file binds
+the same wallet. The on-chain publisher binding is immutable once claimed.
+
+Only the wallet bound by that proof may call `verify_release` for the
+publisher. This prevents an arbitrary caller from front-running a package /
+repository / version tuple, while keeping the ownership evidence auditable in
+the stored binding hashes and source URLs.
+
 The frontend does not query a shared `latest` record after submission. It
 extracts the `release_id` returned by the accepted transaction receipt, then
 reads that exact stored record back from the contract.
@@ -100,6 +121,17 @@ verify_release(
 ) -> str
 ```
 
+Publisher claim method:
+
+```python
+claim_publisher(
+    package_name: str,
+    github_repository_url: str,
+    npm_registry_url: str,
+    ownership_proof_url: str,
+) -> str
+```
+
 Main view methods:
 
 ```python
@@ -107,6 +139,7 @@ get_release_count() -> u64
 get_latest_release_id() -> str
 get_release(release_id: str) -> str
 list_release_ids() -> str
+get_publisher_binding(publisher_identity: str) -> str
 ```
 
 ## Example

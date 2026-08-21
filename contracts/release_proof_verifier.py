@@ -26,6 +26,8 @@ class ReleaseProofVerifier(gl.Contract):
     latest_release_id: str
     release_ids: DynArray[str]
     releases: TreeMap[str, str]
+    publisher_owners: TreeMap[str, str]
+    publisher_bindings: TreeMap[str, str]
 
     def __init__(self):
         self.release_count = u64(0)
@@ -46,6 +48,64 @@ class ReleaseProofVerifier(gl.Contract):
     @gl.public.view
     def list_release_ids(self) -> str:
         return json.dumps([release_id for release_id in self.release_ids], separators=(",", ":"))
+
+    @gl.public.view
+    def get_publisher_binding(self, publisher_identity: str) -> str:
+        return self.publisher_bindings.get(publisher_identity, "")
+
+    @gl.public.write
+    def claim_publisher(
+        self,
+        package_name: str,
+        github_repository_url: str,
+        npm_registry_url: str,
+        ownership_proof_url: str,
+    ) -> str:
+        """Bind a package to the GitHub publisher that controls its proof file."""
+        normalized_package = _normalize_package_name(package_name)
+        publisher = _canonical_github_repository(github_repository_url)
+        registry = _canonical_npm_source(npm_registry_url, normalized_package)
+        proof = _canonical_ownership_proof(ownership_proof_url, publisher)
+        claimant = str(gl.message.sender_address).lower()
+
+        if len(self.publisher_owners.get(publisher["publisher_identity"], "")) > 0:
+            raise Exception("publisher_already_claimed")
+
+        def leader_fn():
+            return _adjudicate_publisher_binding(
+                normalized_package, publisher, registry, proof, claimant
+            )
+
+        def validator_fn(leader_result) -> bool:
+            if not isinstance(leader_result, gl.vm.Return):
+                return False
+            try:
+                proposed = json.loads(leader_result.calldata)
+                independent = json.loads(
+                    _adjudicate_publisher_binding(
+                        normalized_package, publisher, registry, proof, claimant
+                    )
+                )
+            except Exception:
+                return False
+            return (
+                proposed.get("valid") is True
+                and proposed.get("binding_hash") == independent.get("binding_hash")
+                and proposed.get("repository_match") == independent.get("repository_match")
+                and proposed.get("wallet_match") == independent.get("wallet_match")
+            )
+
+        binding = json.loads(gl.vm.run_nondet_unsafe(leader_fn, validator_fn))
+        if binding.get("valid") is not True:
+            raise Exception("publisher_binding_not_proven")
+
+        binding["claimed_by"] = claimant
+        binding["package_identity"] = registry["package_identity"]
+        self.publisher_owners[publisher["publisher_identity"]] = claimant
+        self.publisher_bindings[publisher["publisher_identity"]] = json.dumps(
+            binding, sort_keys=True, separators=(",", ":")
+        )
+        return publisher["publisher_identity"]
 
     @gl.public.write
     def verify_release(
@@ -69,6 +129,12 @@ class ReleaseProofVerifier(gl.Contract):
             changelog_url,
         )
         source_urls = [source["canonical_url"] for source in source_manifest]
+        publisher_identity = source_manifest[0]["publisher_identity"]
+        owner = self.publisher_owners.get(publisher_identity, "")
+        if len(owner) == 0:
+            raise Exception("publisher_must_be_claimed_before_release_verification")
+        if owner.lower() != str(gl.message.sender_address).lower():
+            raise Exception("only_bound_publisher_wallet_can_verify_release")
 
         release_id = _release_id(
             source_manifest[1]["package_identity"],
@@ -126,6 +192,7 @@ class ReleaseProofVerifier(gl.Contract):
             "snapshot_commitments": verdict["snapshot_commitments"],
             "evidence_bundle_hash": verdict["evidence_bundle_hash"],
             "submitted_by": str(gl.message.sender_address),
+            "publisher_binding": self.publisher_bindings.get(publisher_identity, ""),
             "result": verdict,
             "accepted_write": {
                 "release_id": release_id,
@@ -138,6 +205,60 @@ class ReleaseProofVerifier(gl.Contract):
         self.release_ids.append(release_id)
         self.latest_release_id = release_id
         return release_id
+
+
+def _adjudicate_publisher_binding(
+    package_name: str,
+    publisher: dict,
+    registry: dict,
+    proof: dict,
+    claimant: str,
+) -> str:
+    registry_text = gl.nondet.web.render(registry["canonical_url"], mode="text")[:6000]
+    proof_text = gl.nondet.web.render(proof["canonical_url"], mode="text")[:3000]
+    binding_hash = _sha256(
+        publisher["publisher_identity"]
+        + "|"
+        + registry["package_identity"]
+        + "|"
+        + proof["canonical_url"]
+        + "|"
+        + claimant
+        + "|"
+        + _sha256(registry_text)
+        + "|"
+        + _sha256(proof_text)
+    )
+    prompt = f"""
+You verify a package publisher ownership binding for a GenLayer contract.
+
+Package: {package_name}
+Expected GitHub repository: {publisher["canonical_url"]}
+Expected caller wallet: {claimant}
+Registry page text: {registry_text}
+Repository-owned proof-file text: {proof_text}
+
+The proof file must explicitly state the exact npm package '{package_name}', the exact
+GitHub repository '{publisher["canonical_url"]}', and the exact wallet '{claimant}'.
+The registry page must visibly associate the package with that same GitHub repository.
+Return only minified JSON with keys valid, repository_match, wallet_match, summary,
+binding_hash. binding_hash must be exactly '{binding_hash}'.
+"""
+    data = json.loads(gl.nondet.exec_prompt(prompt))
+    return json.dumps(
+        {
+            "valid": bool(data.get("valid")),
+            "repository_match": bool(data.get("repository_match")),
+            "wallet_match": bool(data.get("wallet_match")),
+            "summary": str(data.get("summary", ""))[:350],
+            "binding_hash": str(data.get("binding_hash", "")),
+            "proof_url": proof["canonical_url"],
+            "registry_snapshot_hash": _sha256(registry_text),
+            "proof_snapshot_hash": _sha256(proof_text),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _adjudicate_release(
@@ -320,6 +441,33 @@ def _canonical_github_source(raw_url: str, source_type: str) -> dict:
         "canonical_url": canonical_url,
         "publisher_identity": "github:" + owner + "/" + repository,
     }
+
+
+def _canonical_github_repository(raw_url: str) -> dict:
+    host, parts = _url_parts(raw_url)
+    if host != "github.com" or len(parts) != 2:
+        raise Exception("github_repository_must_be_canonical")
+    owner = parts[0].lower()
+    repository = parts[1].lower()
+    return {
+        "canonical_url": "https://github.com/" + owner + "/" + repository,
+        "publisher_identity": "github:" + owner + "/" + repository,
+    }
+
+
+def _canonical_ownership_proof(raw_url: str, publisher: dict) -> dict:
+    host, parts = _url_parts(raw_url)
+    expected_prefix = publisher["canonical_url"].replace("https://github.com/", "").split("/")
+    if (
+        host != "github.com"
+        or len(parts) < 5
+        or parts[0].lower() != expected_prefix[0]
+        or parts[1].lower() != expected_prefix[1]
+        or parts[2] != "blob"
+        or ".releaseproof" not in parts
+    ):
+        raise Exception("ownership_proof_must_be_versioned_file_in_publisher_repository")
+    return {"canonical_url": "https://github.com/" + "/".join(parts)}
 
 
 def _canonical_npm_source(raw_url: str, package_name: str) -> dict:

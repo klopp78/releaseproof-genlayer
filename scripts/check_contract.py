@@ -88,11 +88,13 @@ def main():
 
     contract = contract_cls()
     required_methods = {
+        "claim_publisher": "write",
         "verify_release": "write",
         "get_release_count": "view",
         "get_latest_release_id": "view",
         "get_release": "view",
         "list_release_ids": "view",
+        "get_publisher_binding": "view",
     }
     for method_name, visibility in required_methods.items():
         method = getattr(contract, method_name, None)
@@ -102,16 +104,15 @@ def main():
         if actual != visibility:
             raise SystemExit(f"{method_name} must be public.{visibility}")
 
-    release_id = module._release_id("genlayer-js", "1.1.8")
+    release_id = module._release_id("npm:genlayer-js", "github:yeagerai/genlayer-js", "1.1.8")
     if not release_id.startswith("rel_") or len(release_id) != 24:
         raise SystemExit("release id format check failed")
 
-    manifest = module._source_manifest(
-        [
-            "https://github.com/yeagerai/genlayer-js/releases",
-            "https://www.npmjs.com/package/genlayer-js/v/1.1.8",
-            "https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md",
-        ]
+    manifest = module._canonical_sources(
+        "genlayer-js",
+        "https://github.com/yeagerai/genlayer-js/releases",
+        "https://www.npmjs.com/package/genlayer-js/v/1.1.8",
+        "https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md",
     )
     if [item["source_type"] for item in manifest] != [
         "github_release",
@@ -121,6 +122,14 @@ def main():
         raise SystemExit("source manifest type check failed")
     if len({item["host"] for item in manifest}) < 2:
         raise SystemExit("source diversity check failed")
+
+    publisher = module._canonical_github_repository("https://github.com/yeagerai/genlayer-js")
+    proof = module._canonical_ownership_proof(
+        "https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json",
+        publisher,
+    )
+    if proof["canonical_url"].endswith("ownership.json") is not True:
+        raise SystemExit("ownership proof canonicalization failed")
 
     print("ReleaseProof contract check passed")
 
