@@ -84,6 +84,15 @@ publisher. This prevents an arbitrary caller from front-running a package /
 repository / version tuple, while keeping the ownership evidence auditable in
 the stored binding hashes and source URLs.
 
+### Binding Enforcement (v3)
+
+The validator path rejects a proposed binding unless both the leader result and
+the validator's independently recomputed result are `valid`, repository-matched,
+and wallet-matched. Release registration then loads that accepted binding and
+requires both its GitHub publisher identity and its stored npm package identity
+to exactly equal the submitted release identity. A publisher binding for one
+npm package cannot authorize registration for another package.
+
 The frontend does not query a shared `latest` record after submission. It
 extracts the `release_id` returned by the accepted transaction receipt, then
 reads that exact stored record back from the contract.

@@ -131,6 +131,29 @@ def main():
     if proof["canonical_url"].endswith("ownership.json") is not True:
         raise SystemExit("ownership proof canonicalization failed")
 
+    binding = {
+        "valid": True,
+        "repository_match": True,
+        "wallet_match": True,
+        "publisher_identity": "github:yeagerai/genlayer-js",
+        "package_identity": "npm:genlayer-js",
+    }
+    if not module._binding_matches_release(
+        binding, "github:yeagerai/genlayer-js", "npm:genlayer-js"
+    ):
+        raise SystemExit("valid publisher binding rejected")
+    if module._binding_matches_release(
+        binding, "github:yeagerai/genlayer-js", "npm:another-package"
+    ):
+        raise SystemExit("binding must reject a different npm package")
+    required_guards = (
+        'independent.get("valid") is True',
+        'release_package_does_not_match_bound_publisher_package',
+        'binding.get("package_identity") == package_identity',
+    )
+    if any(guard not in source for guard in required_guards):
+        raise SystemExit("source binding guards are incomplete")
+
     print("ReleaseProof contract check passed")
 
 

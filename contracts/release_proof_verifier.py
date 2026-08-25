@@ -90,17 +90,27 @@ class ReleaseProofVerifier(gl.Contract):
                 return False
             return (
                 proposed.get("valid") is True
+                and independent.get("valid") is True
+                and proposed.get("repository_match") is True
+                and independent.get("repository_match") is True
+                and proposed.get("wallet_match") is True
+                and independent.get("wallet_match") is True
                 and proposed.get("binding_hash") == independent.get("binding_hash")
                 and proposed.get("repository_match") == independent.get("repository_match")
                 and proposed.get("wallet_match") == independent.get("wallet_match")
             )
 
         binding = json.loads(gl.vm.run_nondet_unsafe(leader_fn, validator_fn))
-        if binding.get("valid") is not True:
+        if (
+            binding.get("valid") is not True
+            or binding.get("repository_match") is not True
+            or binding.get("wallet_match") is not True
+        ):
             raise Exception("publisher_binding_not_proven")
 
         binding["claimed_by"] = claimant
         binding["package_identity"] = registry["package_identity"]
+        binding["publisher_identity"] = publisher["publisher_identity"]
         self.publisher_owners[publisher["publisher_identity"]] = claimant
         self.publisher_bindings[publisher["publisher_identity"]] = json.dumps(
             binding, sort_keys=True, separators=(",", ":")
@@ -135,6 +145,13 @@ class ReleaseProofVerifier(gl.Contract):
             raise Exception("publisher_must_be_claimed_before_release_verification")
         if owner.lower() != str(gl.message.sender_address).lower():
             raise Exception("only_bound_publisher_wallet_can_verify_release")
+        binding = _load_publisher_binding(self, publisher_identity)
+        if not _binding_matches_release(
+            binding,
+            publisher_identity,
+            source_manifest[1]["package_identity"],
+        ):
+            raise Exception("release_package_does_not_match_bound_publisher_package")
 
         release_id = _release_id(
             source_manifest[1]["package_identity"],
@@ -181,7 +198,7 @@ class ReleaseProofVerifier(gl.Contract):
 
         self.release_count = u64(int(self.release_count) + 1)
         record = {
-            "schema_version": "releaseproof.v2",
+            "schema_version": "releaseproof.v3",
             "release_id": release_id,
             "package_name": normalized_package,
             "version": version,
@@ -192,7 +209,7 @@ class ReleaseProofVerifier(gl.Contract):
             "snapshot_commitments": verdict["snapshot_commitments"],
             "evidence_bundle_hash": verdict["evidence_bundle_hash"],
             "submitted_by": str(gl.message.sender_address),
-            "publisher_binding": self.publisher_bindings.get(publisher_identity, ""),
+            "publisher_binding": json.dumps(binding, sort_keys=True, separators=(",", ":")),
             "result": verdict,
             "accepted_write": {
                 "release_id": release_id,
@@ -258,6 +275,23 @@ binding_hash. binding_hash must be exactly '{binding_hash}'.
         },
         sort_keys=True,
         separators=(",", ":"),
+    )
+
+
+def _load_publisher_binding(contract: ReleaseProofVerifier, publisher_identity: str) -> dict:
+    raw = contract.publisher_bindings.get(publisher_identity, "")
+    if len(raw) == 0:
+        raise Exception("publisher_binding_missing")
+    return json.loads(raw)
+
+
+def _binding_matches_release(binding: dict, publisher_identity: str, package_identity: str) -> bool:
+    return (
+        binding.get("valid") is True
+        and binding.get("repository_match") is True
+        and binding.get("wallet_match") is True
+        and binding.get("publisher_identity") == publisher_identity
+        and binding.get("package_identity") == package_identity
     )
 
 
