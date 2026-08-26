@@ -12,6 +12,7 @@
     "test": "npm run build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "contract:check": "node scripts/check-contract.mjs",
+    "flow:check": "node scripts/check-full-flow.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

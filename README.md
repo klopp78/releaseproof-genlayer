@@ -9,8 +9,10 @@ The project is designed for a real trust problem in the agentic software stack. 
 - App: https://klopp78.github.io/releaseproof-genlayer/
 - GitHub repo: https://github.com/klopp78/releaseproof-genlayer
 - Contract source: `contracts/release_proof_verifier.py`
+- Studio v3: https://explorer-studio.genlayer.com/address/0x4d7a0835aE34aE5F1C53c3cC984aF861Dc2C5219
 
-Studio deployment can be added by replacing `RELEASE_PROOF_CONTRACT_ADDRESS` in `lib/genlayer.ts` with the deployed contract address.
+The app defaults to the deployed v3 address and can be overridden with
+`NEXT_PUBLIC_RELEASE_PROOF_CONTRACT_ADDRESS`.
 
 ## What It Verifies
 
@@ -96,6 +98,16 @@ npm package cannot authorize registration for another package.
 The frontend does not query a shared `latest` record after submission. It
 extracts the `release_id` returned by the accepted transaction receipt, then
 reads that exact stored record back from the contract.
+
+## Full Two-Step Client Flow
+
+1. Connect a Studio wallet and enter a configurable contract address.
+2. Call `claim_publisher` with the npm package, canonical GitHub repository,
+   npm registry page, and repository-owned `.releaseproof/ownership.json` URL.
+3. The client reads `get_publisher_binding` for the returned publisher identity.
+4. Call `verify_release` only after the publisher binding is accepted.
+5. The client extracts the returned `release_id` and calls `get_release(release_id)`;
+   it never reads a global latest-result slot.
 
 ## Contract
 
@@ -185,6 +197,7 @@ Expected output shape:
 ```bash
 npm install
 npm run contract:check
+npm run flow:check
 npm run dev
 ```
 

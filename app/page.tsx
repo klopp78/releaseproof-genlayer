@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  claimPublisher,
   readRelease,
   readReleaseCount,
   RELEASE_PROOF_CONTRACT_ADDRESS,
@@ -135,6 +136,16 @@ export default function Home() {
   const [githubReleaseUrl, setGithubReleaseUrl] = useState(examples[0].github);
   const [registryUrl, setRegistryUrl] = useState(examples[0].registry);
   const [changelogUrl, setChangelogUrl] = useState(examples[0].changelog);
+  const [githubRepositoryUrl, setGithubRepositoryUrl] = useState(
+    "https://github.com/yeagerai/genlayer-js",
+  );
+  const [ownershipProofUrl, setOwnershipProofUrl] = useState(
+    "https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json",
+  );
+  const [contractAddress, setContractAddress] = useState(
+    RELEASE_PROOF_CONTRACT_ADDRESS,
+  );
+  const [publisherBinding, setPublisherBinding] = useState("");
   const [walletAddress, setWalletAddress] = useState<WalletAddress | null>(
     null,
   );
@@ -190,10 +201,11 @@ export default function Home() {
     try {
       setStatus("reading");
       setMessage("");
-      const count = await readReleaseCount({ walletAddress: account });
+      const count = await readReleaseCount({ walletAddress: account, contractAddress });
       setReleaseCount(String(count));
       const storedRelease = await readRelease(releaseId.trim(), {
         walletAddress: account,
+        contractAddress,
       });
       setRecord(parseRecord(storedRelease));
       setStatus("accepted");
@@ -217,11 +229,35 @@ export default function Home() {
         githubReleaseUrl,
         registryUrl,
         changelogUrl,
+        contractAddress,
       });
       setRecord(parseRecord(result.release));
       setReleaseId(result.releaseId);
       setStatus("accepted");
       setMessage(`Consensus accepted release ID ${result.releaseId}`);
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function submitPublisherClaim() {
+    const account = walletAddress ?? (await connectWallet());
+    if (!account) return;
+    try {
+      setStatus("submitting");
+      setMessage("");
+      const result = await claimPublisher({
+        walletAddress: account,
+        packageName,
+        githubRepositoryUrl,
+        registryUrl,
+        ownershipProofUrl,
+        contractAddress,
+      });
+      setPublisherBinding(String(result.binding));
+      setStatus("accepted");
+      setMessage(`Publisher bound as ${result.publisherIdentity}`);
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : String(error));
@@ -235,6 +271,7 @@ export default function Home() {
     setGithubReleaseUrl(example.github);
     setRegistryUrl(example.registry);
     setChangelogUrl(example.changelog);
+    setGithubRepositoryUrl(example.github.replace(/\/(releases|tags).*$/, ""));
   }
 
   return (
@@ -316,6 +353,16 @@ export default function Home() {
             value={packageName}
           />
 
+          <label className="field-label" htmlFor="contract-address">
+            Studio contract address
+          </label>
+          <input
+            className="text-input mb-4 w-full"
+            id="contract-address"
+            onChange={(event) => setContractAddress(event.target.value as `0x${string}`)}
+            value={contractAddress}
+          />
+
           <label className="field-label" htmlFor="version">
             Version
           </label>
@@ -325,6 +372,34 @@ export default function Home() {
             onChange={(event) => setVersion(event.target.value)}
             value={version}
           />
+
+          <div className="mb-5 border-t border-[#d8dde8] pt-5">
+            <span className="field-label">1. Bind publisher ownership</span>
+            <p className="mb-3 text-sm leading-6 text-[#60707b]">
+              Claim the package-to-repository binding before verifying releases.
+            </p>
+            <label className="field-label" htmlFor="github-repository">
+              GitHub publisher repository
+            </label>
+            <input
+              className="text-input mb-4 w-full"
+              id="github-repository"
+              onChange={(event) => setGithubRepositoryUrl(event.target.value)}
+              value={githubRepositoryUrl}
+            />
+            <label className="field-label" htmlFor="ownership-proof">
+              Repository ownership proof
+            </label>
+            <input
+              className="text-input mb-4 w-full"
+              id="ownership-proof"
+              onChange={(event) => setOwnershipProofUrl(event.target.value)}
+              value={ownershipProofUrl}
+            />
+            <button className="action-button" onClick={submitPublisherClaim}>
+              Claim publisher
+            </button>
+          </div>
 
           <label className="field-label" htmlFor="github-release">
             GitHub release or tags
@@ -384,8 +459,8 @@ export default function Home() {
           </div>
 
           <p className="mt-4 text-sm text-[#60707b]">
-            Contract address is intentionally isolated in one constant so the
-            deployed Studio address can be swapped without changing app logic.
+            The publisher claim, release verification, and exact-record readback
+            all use the same configurable Studio contract address.
           </p>
         </div>
 
@@ -467,6 +542,7 @@ export default function Home() {
             </div>
 
             {message ? <p className="mt-4 text-sm text-[#9a3d2f]">{message}</p> : null}
+            {publisherBinding ? <p className="mt-2 break-all text-xs text-[#60707b]">{publisherBinding}</p> : null}
           </div>
         </div>
       </section>
