@@ -203,6 +203,13 @@ npm run dev
 
 To submit transactions, use a browser wallet connected to GenLayer Studio.
 
+`npm run flow:check` is a stateful Studio-flow simulation, not a source-text
+scan. It executes publisher claim, accepted receipt parsing, publisher-binding
+readback, release verification, release receipt parsing, and exact
+`get_release(release_id)` readback in that order. The check fails if a release
+is verified before the publisher binding, a receipt lacks its returned ID, or
+the final stored record does not match that exact returned ID.
+
 ## Reproducible Contract Check
 
 The repository includes a deterministic preflight check for the contract source:
