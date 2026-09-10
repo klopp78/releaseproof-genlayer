@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://klopp78.github.io/releaseproof-genlayer/"),
+  metadataBase: new URL("https://releaseproof-genlayer.galaxthoo.chatgpt.site"),
   title: "ReleaseProof for GenLayer",
   description:
     "A GenLayer-powered tool for verifying software release provenance across GitHub, registries, and changelogs.",
