@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 
 const walletAddress = "0xE22D4Dc6865BD451411479D3A146EAFBd87D156B";
 const publisherIdentity = "github:yeagerai/genlayer-js";
@@ -138,4 +139,26 @@ assert.deepEqual(
 );
 assert.equal(outcome.returnedPublisher, publisherIdentity);
 assert.equal(outcome.returnedReleaseId, releaseId);
-console.log("ReleaseProof simulated full-flow check passed");
+
+const pythonRunners = [
+  process.env.PYTHON,
+  ...(process.platform === "win32" ? ["python", "py"] : ["python3", "python"]),
+].filter(Boolean);
+let contractCheck;
+let lastError = "";
+for (const runner of pythonRunners) {
+  contractCheck = spawnSync(runner, ["scripts/check_contract.py"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+  if (contractCheck.status === 0) break;
+  lastError = `${runner}: ${contractCheck.error?.message || contractCheck.stderr || contractCheck.stdout}`;
+}
+
+assert.equal(
+  contractCheck?.status,
+  0,
+  `contract web/LLM publisher-claim flow failed:\n${lastError}`,
+);
+
+console.log("ReleaseProof full-flow check passed: client sequence plus contract web/LLM publisher claim");

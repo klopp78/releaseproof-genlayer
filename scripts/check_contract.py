@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import pathlib
 import sys
 import types
@@ -26,12 +27,101 @@ class _Return:
         self.calldata = calldata
 
 
+class _NondetWeb:
+    calls = []
+
+    @staticmethod
+    def render(url, mode="text"):
+        _NondetWeb.calls.append({"url": url, "mode": mode})
+        if url == "https://registry.npmjs.org/genlayer-js":
+            return json.dumps(
+                {
+                    "name": "genlayer-js",
+                    "repository": {
+                        "type": "git",
+                        "url": "git+https://github.com/yeagerai/genlayer-js.git",
+                    },
+                    "versions": {"1.1.8": {"name": "genlayer-js", "version": "1.1.8"}},
+                },
+                sort_keys=True,
+            )
+        if url == "https://registry.npmjs.org/genlayer-js/1.1.8":
+            return json.dumps(
+                {
+                    "name": "genlayer-js",
+                    "version": "1.1.8",
+                    "repository": {
+                        "type": "git",
+                        "url": "git+https://github.com/yeagerai/genlayer-js.git",
+                    },
+                },
+                sort_keys=True,
+            )
+        if url == "https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json":
+            return json.dumps(
+                {
+                    "package": "genlayer-js",
+                    "repository": "https://github.com/yeagerai/genlayer-js",
+                    "wallet": _GL.message.sender_address.lower(),
+                },
+                sort_keys=True,
+            )
+        if url == "https://github.com/yeagerai/genlayer-js/releases":
+            return "Release genlayer-js v1.1.8 from yeagerai/genlayer-js"
+        if url == "https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md":
+            return "CHANGELOG: genlayer-js 1.1.8 includes Studio client release notes."
+        raise AssertionError(f"unexpected web.render url: {url}")
+
+
+class _Nondet:
+    web = _NondetWeb()
+    prompts = []
+
+    @staticmethod
+    def exec_prompt(prompt):
+        _Nondet.prompts.append(prompt)
+        if "binding_hash must be exactly" in prompt:
+            marker = "binding_hash must be exactly '"
+            binding_hash = prompt.split(marker, 1)[1].split("'", 1)[0]
+            return json.dumps(
+                {
+                    "valid": True,
+                    "repository_match": True,
+                    "wallet_match": True,
+                    "summary": "The npm registry and ownership proof bind genlayer-js to the expected repository and wallet.",
+                    "binding_hash": binding_hash,
+                },
+                separators=(",", ":"),
+            )
+        if "evidence_bundle_hash: exactly" in prompt:
+            marker = 'evidence_bundle_hash: exactly "'
+            evidence_hash = prompt.split(marker, 1)[1].split('"', 1)[0]
+            return json.dumps(
+                {
+                    "status": "verified",
+                    "confidence": 91,
+                    "version_match": True,
+                    "tag_match": True,
+                    "registry_match": True,
+                    "changelog_match": True,
+                    "risk_flags": [],
+                    "evidence_bundle_hash": evidence_hash,
+                    "summary": "GitHub, npm registry, and changelog evidence all support genlayer-js 1.1.8.",
+                },
+                separators=(",", ":"),
+            )
+        raise AssertionError("unexpected exec_prompt request")
+
+
 class _VM:
     Return = _Return
 
     @staticmethod
     def run_nondet_unsafe(leader_fn, validator_fn):
-        return leader_fn()
+        calldata = leader_fn()
+        if validator_fn(_Return(calldata)) is not True:
+            raise AssertionError("validator rejected leader calldata")
+        return calldata
 
 
 class _Contract:
@@ -47,6 +137,7 @@ class _GL:
     public = _Public()
     vm = _VM()
     message = _Message()
+    nondet = _Nondet()
 
 
 class _DynArray(list):
@@ -86,7 +177,7 @@ def main():
     if not issubclass(contract_cls, _Contract):
         raise SystemExit("ReleaseProofVerifier must inherit gl.Contract")
 
-    contract = contract_cls()
+    contract = _fresh_contract(contract_cls)
     required_methods = {
         "claim_publisher": "write",
         "verify_release": "write",
@@ -154,7 +245,85 @@ def main():
     if any(guard not in source for guard in required_guards):
         raise SystemExit("source binding guards are incomplete")
 
+    _exercise_real_contract_flow(module, contract_cls)
+
     print("ReleaseProof contract check passed")
+
+
+def _fresh_contract(contract_cls):
+    contract = contract_cls()
+    contract.release_ids = _DynArray()
+    contract.releases = _TreeMap()
+    contract.publisher_owners = _TreeMap()
+    contract.publisher_bindings = _TreeMap()
+    return contract
+
+
+def _exercise_real_contract_flow(module, contract_cls):
+    _NondetWeb.calls = []
+    _Nondet.prompts = []
+    _GL.message.sender_address = "0xE22D4Dc6865BD451411479D3A146EAFBd87D156B"
+    contract = _fresh_contract(contract_cls)
+
+    publisher_identity = contract.claim_publisher(
+        "genlayer-js",
+        "https://github.com/yeagerai/genlayer-js",
+        "https://registry.npmjs.org/genlayer-js",
+        "https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json",
+    )
+    if publisher_identity != "github:yeagerai/genlayer-js":
+        raise SystemExit("claim_publisher returned the wrong publisher identity")
+
+    binding = json.loads(contract.get_publisher_binding(publisher_identity))
+    if binding.get("package_identity") != "npm:genlayer-js":
+        raise SystemExit("publisher binding did not persist npm package identity")
+    if binding.get("claimed_by") != _GL.message.sender_address.lower():
+        raise SystemExit("publisher binding did not persist claimant wallet")
+    if binding.get("registry_render_url") != "https://registry.npmjs.org/genlayer-js":
+        raise SystemExit("publisher claim did not use npm registry API render URL")
+    if not binding.get("registry_snapshot_hash") or not binding.get("proof_snapshot_hash"):
+        raise SystemExit("publisher claim did not persist evidence snapshot hashes")
+
+    render_urls = [call["url"] for call in _NondetWeb.calls]
+    if render_urls.count("https://registry.npmjs.org/genlayer-js") != 2:
+        raise SystemExit("publisher claim did not execute leader and validator registry renders")
+    if render_urls.count("https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json") != 2:
+        raise SystemExit("publisher claim did not execute leader and validator proof renders")
+    if len([prompt for prompt in _Nondet.prompts if "publisher ownership binding" in prompt]) != 2:
+        raise SystemExit("publisher claim did not execute leader and validator LLM adjudication")
+
+    try:
+        contract.verify_release(
+            "another-package",
+            "1.1.8",
+            "https://github.com/yeagerai/genlayer-js/releases",
+            "https://registry.npmjs.org/another-package/1.1.8",
+            "https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md",
+        )
+    except Exception as exc:
+        if "release_package_does_not_match_bound_publisher_package" not in str(exc):
+            raise
+    else:
+        raise SystemExit("verify_release accepted a package outside the claimed binding")
+
+    release_id = contract.verify_release(
+        "genlayer-js",
+        "1.1.8",
+        "https://github.com/yeagerai/genlayer-js/releases",
+        "https://registry.npmjs.org/genlayer-js/1.1.8",
+        "https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md",
+    )
+    expected_release_id = module._release_id(
+        "npm:genlayer-js", "github:yeagerai/genlayer-js", "1.1.8"
+    )
+    if release_id != expected_release_id:
+        raise SystemExit("verify_release returned a non-deterministic release id")
+
+    record = json.loads(contract.get_release(release_id))
+    if record["accepted_write"]["release_id"] != release_id:
+        raise SystemExit("release record does not bind accepted write to returned release id")
+    if json.loads(record["publisher_binding"])["package_identity"] != "npm:genlayer-js":
+        raise SystemExit("release record did not preserve the accepted publisher binding")
 
 
 if __name__ == "__main__":

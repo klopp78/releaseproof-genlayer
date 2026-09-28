@@ -206,14 +206,22 @@ npm run flow:check
 npm run dev
 ```
 
-To submit transactions, use a browser wallet connected to GenLayer Studio.
+To submit transactions, use a browser wallet connected to GenLayer Studio. The
+contract-level part of `npm run flow:check` requires Python 3. Set `PYTHON` to
+your interpreter path if it is not available as `python3`, `python`, or `py`.
 
-`npm run flow:check` is a stateful Studio-flow simulation, not a source-text
-scan. It executes publisher claim, accepted receipt parsing, publisher-binding
+`npm run flow:check` now runs two layers. First, it verifies the browser client
+sequence for publisher claim, accepted receipt parsing, publisher-binding
 readback, release verification, release receipt parsing, and exact
-`get_release(release_id)` readback in that order. The check fails if a release
-is verified before the publisher binding, a receipt lacks its returned ID, or
-the final stored record does not match that exact returned ID.
+`get_release(release_id)` readback. Second, it loads
+`contracts/release_proof_verifier.py` with a GenLayer runtime stub and actually
+executes `claim_publisher` and `verify_release` against mocked
+`gl.nondet.web.render` and `gl.nondet.exec_prompt` calls. That contract-level
+path asserts that both leader and validator render the npm registry API and
+repository-owned ownership proof, both run LLM adjudication, the accepted
+binding stores npm package identity plus evidence snapshot hashes, mismatched
+packages are rejected, and the final release record is tied to the returned
+`release_id`.
 
 ## Reproducible Contract Check
 
