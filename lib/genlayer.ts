@@ -4,7 +4,7 @@ import { TransactionStatus } from "genlayer-js/types";
 
 export const RELEASE_PROOF_CONTRACT_ADDRESS =
   (process.env.NEXT_PUBLIC_RELEASE_PROOF_CONTRACT_ADDRESS ??
-    "0x4d7a0835aE34aE5F1C53c3cC984aF861Dc2C5219") as `0x${string}`;
+    "0x25ce116871aB0B1731E213c3A3aACBF7A9D57218") as `0x${string}`;
 
 export type WalletAddress = `0x${string}`;
 

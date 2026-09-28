@@ -9,7 +9,7 @@ The project is designed for a real trust problem in the agentic software stack. 
 - App: https://klopp78.github.io/releaseproof-genlayer/
 - GitHub repo: https://github.com/klopp78/releaseproof-genlayer
 - Contract source: `contracts/release_proof_verifier.py`
-- Studio v3: https://explorer-studio.genlayer.com/address/0x4d7a0835aE34aE5F1C53c3cC984aF861Dc2C5219
+- Studio v4: https://explorer-studio.genlayer.com/address/0x25ce116871aB0B1731E213c3A3aACBF7A9D57218
 
 The app defaults to the deployed v3 address and can be overridden with
 `NEXT_PUBLIC_RELEASE_PROOF_CONTRACT_ADDRESS`.
