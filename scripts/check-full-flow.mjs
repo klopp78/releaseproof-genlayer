@@ -17,7 +17,7 @@ class StudioFlowSimulator {
       const [packageName, repositoryUrl, registryUrl, proofUrl] = args;
       assert.equal(packageName, "genlayer-js");
       assert.equal(repositoryUrl, "https://github.com/yeagerai/genlayer-js");
-      assert.match(registryUrl, /npmjs\.com\/package\/genlayer-js/);
+      assert.match(registryUrl, /registry\.npmjs\.org\/genlayer-js/);
       assert.match(proofUrl, /\.releaseproof\/ownership\.json$/);
       this.publisherBindings.set(publisherIdentity, {
         publisher_identity: publisherIdentity,
@@ -31,7 +31,7 @@ class StudioFlowSimulator {
       assert.equal(packageName, "genlayer-js");
       assert.equal(version, "1.1.8");
       assert.match(releaseUrl, /github\.com\/yeagerai\/genlayer-js\/releases/);
-      assert.match(registryUrl, /npmjs\.com\/package\/genlayer-js/);
+      assert.match(registryUrl, /registry\.npmjs\.org\/genlayer-js\/1\.1\.8/);
       assert.match(changelogUrl, /github\.com\/yeagerai\/genlayer-js/);
       assert.ok(this.publisherBindings.has(publisherIdentity));
       this.releases.set(releaseId, {
@@ -79,7 +79,7 @@ async function runFullFlow(client) {
     args: [
       "genlayer-js",
       "https://github.com/yeagerai/genlayer-js",
-      "https://www.npmjs.com/package/genlayer-js",
+      "https://registry.npmjs.org/genlayer-js",
       "https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json",
     ],
   });
@@ -103,7 +103,7 @@ async function runFullFlow(client) {
       "genlayer-js",
       "1.1.8",
       "https://github.com/yeagerai/genlayer-js/releases",
-      "https://www.npmjs.com/package/genlayer-js/v/1.1.8",
+      "https://registry.npmjs.org/genlayer-js/1.1.8",
       "https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md",
     ],
   });

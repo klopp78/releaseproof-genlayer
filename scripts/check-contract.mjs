@@ -64,6 +64,10 @@ assert(/snapshot_commitments/.test(source), "contract must persist snapshot comm
 assert(/canonical_sources/.test(source), "contract must canonicalize source identities");
 assert(/registry_package_identity_mismatch/.test(source), "contract must bind registry URLs to package identity");
 assert(/changelog_must_belong_to_release_publisher/.test(source), "contract must bind changelog to publisher identity");
+assert(/registry\.npmjs\.org/.test(source), "contract must support npm registry API URLs");
+assert(/render_url/.test(source), "contract must persist validator render URLs");
+assert(/gl\.nondet\.web\.render\(registry\["render_url"\]/.test(source), "publisher claim must render npm registry API metadata, not npmjs UI pages");
+assert(/render_url_hash/.test(source), "contract must bind render URL hashes into commitments");
 
 const releaseId = `rel_${sha256("npm:genlayer-js|github:yeagerai/genlayer-js|1.1.8").slice(0, 20)}`;
 assert(releaseId.length === 24, "release id format check failed");

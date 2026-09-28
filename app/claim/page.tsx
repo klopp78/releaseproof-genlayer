@@ -8,7 +8,7 @@ declare global { interface Window { ethereum?: { request: (args: { method: strin
 export default function ClaimPage() {
   const [packageName, setPackageName] = useState("genlayer-js");
   const [repositoryUrl, setRepositoryUrl] = useState("https://github.com/yeagerai/genlayer-js");
-  const [registryUrl, setRegistryUrl] = useState("https://www.npmjs.com/package/genlayer-js");
+  const [registryUrl, setRegistryUrl] = useState("https://registry.npmjs.org/genlayer-js");
   const [proofUrl, setProofUrl] = useState("https://github.com/yeagerai/genlayer-js/blob/main/.releaseproof/ownership.json");
   const [address, setAddress] = useState(RELEASE_PROOF_CONTRACT_ADDRESS);
   const [wallet, setWallet] = useState<WalletAddress | null>(null);

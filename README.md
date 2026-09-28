@@ -61,15 +61,19 @@ This project follows the Studio storage guidance announced by the GenLayer team:
 ## Source Provenance and Readback
 
 ReleaseProof accepts canonical GitHub release/changelog URLs from the same
-publisher repository and canonical npm package URLs that match the submitted
-package name. The accepted record binds the npm package identity, GitHub
-publisher identity, canonical URLs, URL hashes, and rendered snapshot hashes.
+publisher repository and npm package evidence that matches the submitted
+package name. npmjs.com package pages may still be submitted as canonical
+provenance, but validators render the matching `registry.npmjs.org` metadata
+endpoint so publisher claims and release checks do not depend on npmjs UI pages
+that can return 403 to automated web rendering. The accepted record binds the
+npm package identity, GitHub publisher identity, canonical URLs, validator
+render URLs, URL hashes, render URL hashes, and rendered snapshot hashes.
 
 ### Publisher Ownership Gate
 
 Release verification is deliberately a two-step protocol. Before any release
 can be recorded for a GitHub publisher, that publisher must call
-`claim_publisher(...)`. The contract renders both the npm package page and a
+`claim_publisher(...)`. The contract renders npm registry metadata and a
 repository-owned proof file at a versioned path such as:
 
 ```text
@@ -77,7 +81,7 @@ https://github.com/<owner>/<repo>/blob/<branch>/.releaseproof/ownership.json
 ```
 
 That file must state the exact npm package, the exact GitHub repository, and
-the caller wallet. Validators independently confirm that the npm registry page
+the caller wallet. Validators independently confirm that the npm registry metadata
 associates the package with the same repository and that the proof file binds
 the same wallet. The on-chain publisher binding is immutable once claimed.
 
@@ -103,7 +107,8 @@ reads that exact stored record back from the contract.
 
 1. Connect a Studio wallet and enter a configurable contract address.
 2. Call `claim_publisher` with the npm package, canonical GitHub repository,
-   npm registry page, and repository-owned `.releaseproof/ownership.json` URL.
+   npm registry API or npmjs package URL, and repository-owned
+   `.releaseproof/ownership.json` URL.
 3. The client reads `get_publisher_binding` for the returned publisher identity.
 4. Call `verify_release` only after the publisher binding is accepted.
 5. The client extracts the returned `release_id` and calls `get_release(release_id)`;
@@ -169,7 +174,7 @@ get_publisher_binding(publisher_identity: str) -> str
 Package: genlayer-js
 Version: 1.1.8
 GitHub: https://github.com/yeagerai/genlayer-js/releases
-Registry: https://www.npmjs.com/package/genlayer-js/v/1.1.8
+Registry: https://registry.npmjs.org/genlayer-js/1.1.8
 Changelog: https://github.com/yeagerai/genlayer-js/blob/main/CHANGELOG.md
 ```
 

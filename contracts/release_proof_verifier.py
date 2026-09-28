@@ -138,7 +138,7 @@ class ReleaseProofVerifier(gl.Contract):
             registry_url,
             changelog_url,
         )
-        source_urls = [source["canonical_url"] for source in source_manifest]
+        source_urls = [source["render_url"] for source in source_manifest]
         publisher_identity = source_manifest[0]["publisher_identity"]
         owner = self.publisher_owners.get(publisher_identity, "")
         if len(owner) == 0:
@@ -231,7 +231,7 @@ def _adjudicate_publisher_binding(
     proof: dict,
     claimant: str,
 ) -> str:
-    registry_text = gl.nondet.web.render(registry["canonical_url"], mode="text")[:6000]
+    registry_text = gl.nondet.web.render(registry["render_url"], mode="text")[:6000]
     proof_text = gl.nondet.web.render(proof["canonical_url"], mode="text")[:3000]
     binding_hash = _sha256(
         publisher["publisher_identity"]
@@ -252,7 +252,7 @@ You verify a package publisher ownership binding for a GenLayer contract.
 Package: {package_name}
 Expected GitHub repository: {publisher["canonical_url"]}
 Expected caller wallet: {claimant}
-Registry page text: {registry_text}
+Registry metadata text: {registry_text}
 Repository-owned proof-file text: {proof_text}
 
 The proof file must explicitly state the exact npm package '{package_name}', the exact
@@ -270,6 +270,8 @@ binding_hash. binding_hash must be exactly '{binding_hash}'.
             "summary": str(data.get("summary", ""))[:350],
             "binding_hash": str(data.get("binding_hash", "")),
             "proof_url": proof["canonical_url"],
+            "registry_canonical_url": registry["canonical_url"],
+            "registry_render_url": registry["render_url"],
             "registry_snapshot_hash": _sha256(registry_text),
             "proof_snapshot_hash": _sha256(proof_text),
         },
@@ -313,7 +315,10 @@ def _adjudicate_release(
                 "source_index": index + 1,
                 "source_type": source_manifest[index]["source_type"],
                 "host": source_manifest[index]["host"],
+                "canonical_url": source_manifest[index]["canonical_url"],
+                "render_url": source_manifest[index]["render_url"],
                 "url_hash": source_manifest[index]["url_hash"],
+                "render_url_hash": source_manifest[index]["render_url_hash"],
                 "snapshot_hash": snapshot_hash,
                 "snapshot_chars": len(rendered_text),
                 "text": rendered_text,
@@ -327,9 +332,11 @@ def _adjudicate_release(
                 "source_index": source["source_index"],
                 "source_type": source["source_type"],
                 "canonical_url": source["canonical_url"],
+                "render_url": source["render_url"],
                 "package_identity": source["package_identity"],
                 "publisher_identity": source["publisher_identity"],
                 "url_hash": source["url_hash"],
+                "render_url_hash": source["render_url_hash"],
                 "snapshot_hash": snapshot_hash,
                 "snapshot_chars": rendered["snapshot_chars"],
             }
@@ -449,14 +456,17 @@ def _canonical_sources(
 
 
 def _manifest_entry(index: int, source: dict, package_identity: str) -> dict:
+    render_url = source.get("render_url", source["canonical_url"])
     return {
         "source_index": index,
         "source_type": source["source_type"],
         "host": source["host"],
         "canonical_url": source["canonical_url"],
+        "render_url": render_url,
         "package_identity": package_identity,
         "publisher_identity": source["publisher_identity"],
         "url_hash": _sha256(source["canonical_url"]),
+        "render_url_hash": _sha256(render_url),
     }
 
 
@@ -473,6 +483,7 @@ def _canonical_github_source(raw_url: str, source_type: str) -> dict:
         "source_type": source_type,
         "host": host,
         "canonical_url": canonical_url,
+        "render_url": canonical_url,
         "publisher_identity": "github:" + owner + "/" + repository,
     }
 
@@ -506,8 +517,27 @@ def _canonical_ownership_proof(raw_url: str, publisher: dict) -> dict:
 
 def _canonical_npm_source(raw_url: str, package_name: str) -> dict:
     host, parts = _url_parts(raw_url)
+    if host == "registry.npmjs.org":
+        registry_package = parts[0].replace("%2f", "/").replace("%2F", "/")
+        if _normalize_package_name(registry_package) != package_name:
+            raise Exception("registry_package_identity_mismatch")
+        version = ""
+        if len(parts) > 1:
+            if len(parts) != 2:
+                raise Exception("registry_version_path_must_be_single_segment")
+            version = parts[1]
+        canonical_url = _npm_registry_api_url(package_name, version)
+        return {
+            "source_type": "package_registry",
+            "host": "registry.npmjs.org",
+            "canonical_url": canonical_url,
+            "render_url": canonical_url,
+            "publisher_identity": "npm:" + package_name,
+            "package_identity": "npm:" + package_name,
+        }
+
     if host not in ("npmjs.com", "www.npmjs.com") or len(parts) < 2 or parts[0] != "package":
-        raise Exception("registry_must_be_canonical_npm_package_url")
+        raise Exception("registry_must_be_canonical_npm_package_or_registry_api_url")
 
     package_end = 3 if parts[1].startswith("@") else 2
     if len(parts) < package_end:
@@ -515,15 +545,31 @@ def _canonical_npm_source(raw_url: str, package_name: str) -> dict:
     registry_package = "/".join(parts[1:package_end])
     if _normalize_package_name(registry_package) != package_name:
         raise Exception("registry_package_identity_mismatch")
+    version = ""
+    if len(parts) > package_end:
+        if len(parts) != package_end + 2 or parts[package_end] != "v":
+            raise Exception("registry_version_path_must_use_v_segment")
+        version = parts[package_end + 1]
 
     canonical_url = "https://www.npmjs.com/" + "/".join(parts)
+    render_url = _npm_registry_api_url(package_name, version)
     return {
         "source_type": "package_registry",
-        "host": "www.npmjs.com",
+        "host": "registry.npmjs.org",
         "canonical_url": canonical_url,
+        "render_url": render_url,
         "publisher_identity": "npm:" + package_name,
         "package_identity": "npm:" + package_name,
     }
+
+
+def _npm_registry_api_url(package_name: str, version: str) -> str:
+    package_path = package_name
+    if package_name.startswith("@"):
+        package_path = package_name.replace("/", "%2f")
+    if len(version.strip()) == 0:
+        return "https://registry.npmjs.org/" + package_path
+    return "https://registry.npmjs.org/" + package_path + "/" + version.strip()
 
 
 def _normalize_package_name(raw_name: str) -> str:
